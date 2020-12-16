@@ -190,6 +190,7 @@ enum {
 	CommandOpacity,
 	CommandProcessingYUV,
 	CommandOutputYUV,
+	CommandSerDes,
 };
 
 static COMMAND_LIST cmdline_commands[] =
@@ -230,6 +231,7 @@ static COMMAND_LIST cmdline_commands[] =
 	{ CommandOpacity,	"-opacity",	"op", "Preview window opacity (0-255)", 1},
 	{ CommandProcessingYUV,	"-processing_yuv", "PY",  "Pass processed YUV images into an image processing function", 0 },
 	{ CommandOutputYUV,	"-output_yuv",  "oY", "Set the output filename for YUV data", 0 },
+	{ CommandSerDes,	"-serdes",  "sd", "Use 953/954 serdes", 0 },
 };
 
 static int cmdline_commands_size = sizeof(cmdline_commands) / sizeof(cmdline_commands[0]);
@@ -283,6 +285,7 @@ typedef struct {
 	int capture_yuv;
 	char *output_yuv;
 	int processing_yuv;
+	int ser_des;
 } RASPIRAW_PARAMS_T;
 
 typedef struct {
@@ -352,6 +355,110 @@ static int i2c_rd(int fd, uint8_t i2c_addr, uint16_t reg, uint8_t *values, uint3
 	return 0;
 }
 
+#define UB954_ID    0x60
+#define UB953_ID    0x30
+#define UB953_ALIAS 0x18
+#define OV_ID       0x6C
+#define OV_ALIAS    OV_ID
+struct sensor_regs serdes_954_step1[] = {
+   {0x0001, 0x01},        //reset 954
+   {0x004C, 0x01},        // setup port0
+   {0x0058, 0x5E},        // Set up Back Channel Config (0x58)
+   //{0x005B, UB953_ID},  // Set up SER ID
+   {0x005C, UB953_ALIAS}, // Set up SER Alias ID
+   {0x005D, OV_ID},       // Set up Slave/Camera ID
+   {0x0065, OV_ALIAS},    // Set up Slave/Camera Alias ID
+};
+struct sensor_regs serdes_953_step2[] = {
+   //{0x0001, 0x01},        //reset 953
+   {0x0002, 0x13},        // Set serializer CSI-2 data input from imager lane to 2 lane, 1.8V VDDIO
+   {0x000E, 0xC0},        // Set GPIO2 and GPIO3 to outputs, where GPIO2 = PWDN and GPIO3 = RESET
+   {0x000D, 0x0C},        // Set GPIO2 and GPIO3 to High - bring OVT10640 out of power down mode
+   {0xFFFF, 100},         // sleep(0.1)
+   {0x000D, 0x08},        // Bring GPIO3 low to place 10640 in reset
+   {0xFFFF, 1000},        // sleep(1)
+   {0x000D, 0x0C},        // Bring GPIO3 high again to prepare 10640 for initialization
+};
+struct sensor_regs serdes_954_step3[] = {
+   {0x0032, 0x01},
+   {0x0033, 0x23},        // enable CSI output and CSI continuous clock, 2lane
+   {0x0021, 0x81},        // enable CSI replicate mode
+   {0x0020, 0x20},        // enable RX 0 port forwarding to CSI ports
+};
+struct sensor_regs serdes_ov5647_step4[] = {
+   {0x0103, 0x01},        // Bring GPIO3 low to place 10640 in reset
+   {0xFFFF, 100},         // sleep(0.1)
+};
+struct serdes_reg_def
+{
+	char *name;
+	uint8_t i2c_id;
+	uint8_t i2c_alias;
+	int i2c_addr_len;
+	struct sensor_regs *regs;
+	int num_regs;
+};
+struct serdes_reg_def serdes_regs[] = {
+    {"954", UB954_ID, UB954_ID, 1, serdes_954_step1, NUM_ELEMENTS(serdes_954_step1)},
+    {"953", UB953_ID, UB953_ALIAS, 1, serdes_953_step2, NUM_ELEMENTS(serdes_953_step2)},
+    {"954", UB954_ID, UB954_ID, 1, serdes_954_step3, NUM_ELEMENTS(serdes_954_step3)},
+    {"OV5647", OV_ID, OV_ALIAS, 2, serdes_ov5647_step4, NUM_ELEMENTS(serdes_ov5647_step4)},
+};
+static int num_serdes_steps = NUM_ELEMENTS(serdes_regs);
+
+void i2c_wr(int fd, const struct serdes_reg_def *regdef)
+{
+    int i;
+    for (i = 0; i < regdef->num_regs; i++) {
+        if (regdef->regs[i].reg == 0xFFFF) {
+            vcos_log_error("%s(0x%02X)  #%03d: sleep %d ms", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].data);
+            vcos_sleep(regdef->regs[i].data);
+        } else {
+			unsigned char msg[4] = {0};
+			int len;
+			if (regdef->i2c_addr_len == 1) {
+				msg[0] = regdef->regs[i].reg;
+				msg[1] = regdef->regs[i].data & 0xFF;
+				len = 2;
+			} else {
+				msg[0] = regdef->regs[i].reg >> 8;
+				msg[1] = regdef->regs[i].reg & 0xFF;
+				msg[2] = regdef->regs[i].data & 0xFF;
+				len = 3;
+			}
+            if (write(fd, msg, len) != len){
+                vcos_log_error("%s(0x%02X)  #%03d: write address(0x%04X) data(0x%02X) failed!", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].reg, regdef->regs[i].data);
+            } else {
+                vcos_log_error("%s(0x%02X)  #%03d: write address(0x%04X) to data(0x%02X)", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].reg, regdef->regs[i].data);
+            }
+        }
+    }
+}
+
+int setupSerDes()
+{
+    int fd;
+    printf("Try to setup ser-des\n");
+    fd = open(i2c_device_name, O_RDWR);
+    if (!fd) {
+        vcos_log_error("Couldn't open I2C device");
+        return 1;
+    }
+    //if (!i2c_rd(fd, UB954_ID, sensor->i2c_ident_reg, (uint8_t*)&reg, sensor->i2c_ident_length, sensor))
+    for (int i = 0; i < num_serdes_steps; i++) {
+        vcos_log_error("Try to send command to device %s(I2CAddr:0x%02x/0x%02x), it include %d cmds", 
+                serdes_regs[i].name, serdes_regs[i].i2c_id, serdes_regs[i].i2c_alias >> 1, serdes_regs[i].num_regs);
+        if (ioctl(fd, I2C_SLAVE_FORCE, serdes_regs[i].i2c_alias >> 1) < 0) {
+            close(fd);
+            vcos_log_error("Failed to set I2C address");
+            return 2;
+        } else {
+            i2c_wr(fd, &serdes_regs[i]);
+        }
+    }
+    close(fd);
+}
+
 const struct sensor_def * probe_sensor(void)
 {
 	int fd;
@@ -402,6 +509,7 @@ void send_regs(int fd, const struct sensor_def *sensor, const struct sensor_regs
 		else if (regs[i].reg == 0xFFFE)
 		{
 			vcos_sleep(regs[i].data);
+			vcos_log_error("Sleep %0dms", regs[i].data);
 		}
 		else
 		{
@@ -418,7 +526,9 @@ void send_regs(int fd, const struct sensor_def *sensor, const struct sensor_regs
 				}
 				if (write(fd, msg, len) != len)
 				{
-					vcos_log_error("Failed to write register index %d (%02X val %02X)", i, regs[i].reg, regs[i].data);
+					vcos_log_error("Failed to write register index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
+				} else {
+					vcos_log_error("Write index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
 				}
 			}
 			else
@@ -434,7 +544,9 @@ void send_regs(int fd, const struct sensor_def *sensor, const struct sensor_regs
 				}
 				if (write(fd, msg, len) != len)
 				{
-					vcos_log_error("Failed to write register index %d", i);
+					vcos_log_error("Failed to write register index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
+				} else {
+					vcos_log_error("Write index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
 				}
 			}
 		}
@@ -1090,6 +1202,10 @@ static int parse_cmdline(int argc, char **argv, RASPIRAW_PARAMS_T *cfg)
 				cfg->write_empty = 1;
 				break;
 
+			case CommandSerDes:
+				cfg->ser_des = 1;
+				break;
+
 			case CommandDecodeMetadata:
 				cfg->decodemetadata = 1;
 				break;
@@ -1485,6 +1601,7 @@ int main(int argc, char** argv) {
 	cfg.top = -1;
 	cfg.opacity = 255;
 	cfg.fullscreen = 1;
+	cfg.ser_des = 0;
 
 	bcm_host_init();
 	vcos_log_register("RaspiRaw", VCOS_LOG_CATEGORY);
@@ -1506,6 +1623,11 @@ int main(int argc, char** argv) {
 	snprintf(i2c_device_name, sizeof(i2c_device_name), "/dev/i2c-%d", cfg.i2c_bus);
 	printf("Using i2C device %s\n", i2c_device_name);
 
+    if (cfg.ser_des) {
+        // before do any i2c work, we need do 953/954 config
+        setupSerDes();
+    }
+    
 	sensor = probe_sensor();
 	if (!sensor)
 	{
