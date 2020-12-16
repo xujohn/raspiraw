@@ -106,7 +106,7 @@ struct sensor_def
 	int num_modes;
 	struct sensor_regs *stop;
 	int num_stop_regs;
-
+    
 	uint8_t i2c_addr;		// Device I2C slave address
 	int i2c_addressing;		// Length of register address values
 	int i2c_data_size;		// Length of register data to write
@@ -142,12 +142,14 @@ struct sensor_def
 #include "imx219_modes.h"
 #include "adv7282m_modes.h"
 #include "imx477_modes.h"
+#include "ov10640_modes.h"
 
 const struct sensor_def *sensors[] = {
 	&ov5647,
 	&imx219,
 	&adv7282,
 	&imx477,
+	&ov10640,
 	NULL
 };
 
@@ -231,7 +233,7 @@ static COMMAND_LIST cmdline_commands[] =
 	{ CommandOpacity,	"-opacity",	"op", "Preview window opacity (0-255)", 1},
 	{ CommandProcessingYUV,	"-processing_yuv", "PY",  "Pass processed YUV images into an image processing function", 0 },
 	{ CommandOutputYUV,	"-output_yuv",  "oY", "Set the output filename for YUV data", 0 },
-	{ CommandSerDes,	"-serdes",  "sd", "Use 953/954 serdes", 0 },
+	{ CommandSerDes,	"-serdes", "sd", "Use 953/954 serdes, followed with sensor name, eg: ov5647", 1 },
 };
 
 static int cmdline_commands_size = sizeof(cmdline_commands) / sizeof(cmdline_commands[0]);
@@ -285,7 +287,8 @@ typedef struct {
 	int capture_yuv;
 	char *output_yuv;
 	int processing_yuv;
-	int ser_des;
+    uint8_t ser_des_sensor_id, ser_des_sensor_alias;  // the sensor id and alias @8bits
+    char *ser_des_sensor;       // sensor name ov5640 or ov10460
 } RASPIRAW_PARAMS_T;
 
 typedef struct {
@@ -355,19 +358,22 @@ static int i2c_rd(int fd, uint8_t i2c_addr, uint16_t reg, uint8_t *values, uint3
 	return 0;
 }
 
-#define UB954_ID    0x60
-#define UB953_ID    0x30
-#define UB953_ALIAS 0x18
-#define OV_ID       0x6C
-#define OV_ALIAS    OV_ID
+// below ID will be used by 954/953, so address is 8bits, the pi will use 7bits.
+#define UB954_ID        0x60
+#define UB953_ID        0x30
+#define UB953_ALIAS     0x18
+#define OV_5647_ID      0x6C        // for OV5647
+#define OV_5647_ALIAS   OV_5647_ID  // for OV5647
+#define OV_10640_ID     0x60        // for OV10640
+#define OV_10640_ALIAS  0x62        // for OV10640, to avoid conflict with 964, we change to 0x62@8bits
 struct sensor_regs serdes_954_step1[] = {
-   {0x0001, 0x01},        //reset 954
-   {0x004C, 0x01},        // setup port0
-   {0x0058, 0x5E},        // Set up Back Channel Config (0x58)
-   //{0x005B, UB953_ID},  // Set up SER ID
-   {0x005C, UB953_ALIAS}, // Set up SER Alias ID
-   {0x005D, OV_ID},       // Set up Slave/Camera ID
-   {0x0065, OV_ALIAS},    // Set up Slave/Camera Alias ID
+   {0x0001, 0x01},                  //reset 954
+   {0x004C, 0x01},                  // setup port0
+   {0x0058, 0x5E},                  // Set up Back Channel Config (0x58)
+   //{0x005B, UB953_ID},            // Set up SER ID
+   {0x005C, UB953_ALIAS},           // Set up SER Alias ID
+   {0x005D, OV_5647_ID},            // Set up Slave/Camera ID, NOTICE: should change it base the input.
+   {0x0065, OV_5647_ALIAS},         // Set up Slave/Camera Alias ID
 };
 struct sensor_regs serdes_953_step2[] = {
    //{0x0001, 0x01},        //reset 953
@@ -398,11 +404,21 @@ struct serdes_reg_def
 	struct sensor_regs *regs;
 	int num_regs;
 };
+
+struct sensor_regs ov5647_serdes[] = {
+   {0x0103, 0x01},        // Bring GPIO3 low to place 10640 in reset
+   {0xFFFF, 100},         // sleep(0.1)
+};
+struct sensor_regs ov10640_serdes[] = {
+   {0x3013, 0x01},        // TODO: #Initialize OVT10640
+   {0xFFFF, 100},         // TODO: sleep(0.1)
+};
 struct serdes_reg_def serdes_regs[] = {
     {"954", UB954_ID, UB954_ID, 1, serdes_954_step1, NUM_ELEMENTS(serdes_954_step1)},
     {"953", UB953_ID, UB953_ALIAS, 1, serdes_953_step2, NUM_ELEMENTS(serdes_953_step2)},
     {"954", UB954_ID, UB954_ID, 1, serdes_954_step3, NUM_ELEMENTS(serdes_954_step3)},
-    {"OV5647", OV_ID, OV_ALIAS, 2, serdes_ov5647_step4, NUM_ELEMENTS(serdes_ov5647_step4)},
+    {"OV5647", OV_5647_ID, OV_5647_ALIAS, 2, ov5647_serdes, NUM_ELEMENTS(ov5647_serdes)},
+    {"OV10640", OV_10640_ID, OV_10640_ALIAS, 2, ov10640_serdes, NUM_ELEMENTS(ov10640_serdes)},
 };
 static int num_serdes_steps = NUM_ELEMENTS(serdes_regs);
 
@@ -411,7 +427,7 @@ void i2c_wr(int fd, const struct serdes_reg_def *regdef)
     int i;
     for (i = 0; i < regdef->num_regs; i++) {
         if (regdef->regs[i].reg == 0xFFFF) {
-            vcos_log_error("%s(0x%02X)  #%03d: sleep %d ms", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].data);
+            vcos_log_error("%s(0x%02X@7bits)  #%03d: sleep %d ms", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].data);
             vcos_sleep(regdef->regs[i].data);
         } else {
 			unsigned char msg[4] = {0};
@@ -427,27 +443,70 @@ void i2c_wr(int fd, const struct serdes_reg_def *regdef)
 				len = 3;
 			}
             if (write(fd, msg, len) != len){
-                vcos_log_error("%s(0x%02X)  #%03d: write address(0x%04X) data(0x%02X) failed!", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].reg, regdef->regs[i].data);
+                vcos_log_error("%s(0x%02X@7bits)  #%03d: write address(0x%04X) data(0x%02X) failed!", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].reg, regdef->regs[i].data);
             } else {
-                vcos_log_error("%s(0x%02X)  #%03d: write address(0x%04X) to data(0x%02X)", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].reg, regdef->regs[i].data);
+                vcos_log_error("%s(0x%02X@7bits)  #%03d: write address(0x%04X) to data(0x%02X)", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].reg, regdef->regs[i].data);
             }
         }
     }
 }
 
-int setupSerDes()
+int setup_sensor_id_offset(uint8_t sensor_id, uint8_t sensor_alias, char *name, struct serdes_reg_def *regdef)
+{
+    int i;
+    int found = 0;
+    for (i = 0; i < regdef->num_regs; i++) {
+        if (regdef->regs[i].reg == 0x005D) {
+            regdef->regs[i].data = serdes_regs->i2c_id;
+            vcos_log_error("Found 0x005D command, change sensor(%s) id(I2C Address) to 0x%02X(0x%02X@7bits)", name, sensor_id, sensor_id >> 1);
+            found ++;
+        } else if (regdef->regs[i].reg == 0x0065) {
+            regdef->regs[i].data = serdes_regs->i2c_id;
+            vcos_log_error("Found 0x0065 command, change sensor(%s) alias(I2C Address) to 0x%02X(0x%02X@7bits)", name, sensor_alias, sensor_alias >> 1);
+            found ++;
+        }
+    }
+    if (found == 2) {
+        return 0;
+    } else {
+        vcos_log_error("Couldn't found 0x005D command, cannot change sensor(%s) id", name);
+        return 1;
+    }
+}
+
+int setupSerDes(uint8_t sensor_id, uint8_t sensor_alias, char *sensor_name)
 {
     int fd;
-    printf("Try to setup ser-des\n");
+    vcos_log_error("Try to setup ser-des for sensor \"%s\"(0x%02X@8bits)", sensor_name, sensor_id);
     fd = open(i2c_device_name, O_RDWR);
     if (!fd) {
         vcos_log_error("Couldn't open I2C device");
         return 1;
     }
     //if (!i2c_rd(fd, UB954_ID, sensor->i2c_ident_reg, (uint8_t*)&reg, sensor->i2c_ident_length, sensor))
+    if (0 != setup_sensor_id_offset(sensor_id, sensor_alias, sensor_name, &serdes_regs[0])) {
+        return 1;
+    }
+    
+    int run;
     for (int i = 0; i < num_serdes_steps; i++) {
-        vcos_log_error("Try to send command to device %s(I2CAddr:0x%02x/0x%02x), it include %d cmds", 
-                serdes_regs[i].name, serdes_regs[i].i2c_id, serdes_regs[i].i2c_alias >> 1, serdes_regs[i].num_regs);
+        run = 0;
+        if (serdes_regs[i].i2c_alias == UB954_ID) {
+            run = 1;
+        } else if (serdes_regs[i].i2c_alias == UB953_ALIAS) {
+            run = 1;
+        } else if (serdes_regs[i].i2c_alias == sensor_alias) {
+            run = 1;
+        }
+        if (run == 0) {
+            vcos_log_error("Skip commands for device %s(I2C Addr:0x%02X@8bits/0x%02X@7bits Alias:0x%02X@8bits/0x%02X@7bits)", 
+                    serdes_regs[i].name, serdes_regs[i].i2c_id, serdes_regs[i].i2c_id >> 1, 
+                    serdes_regs[i].i2c_alias, serdes_regs[i].i2c_alias >> 1); 
+            continue;
+        }
+        vcos_log_error("Try to send command to device %s(I2C Addr:0x%02X@8bits/0x%02X@7bits Alias:0x%02X@8bits/0x%02X@7bits), it include %d cmds", 
+                serdes_regs[i].name, serdes_regs[i].i2c_id, serdes_regs[i].i2c_id >> 1, 
+                serdes_regs[i].i2c_alias, serdes_regs[i].i2c_alias >> 1, serdes_regs[i].num_regs);
         if (ioctl(fd, I2C_SLAVE_FORCE, serdes_regs[i].i2c_alias >> 1) < 0) {
             close(fd);
             vcos_log_error("Failed to set I2C address");
@@ -457,6 +516,8 @@ int setupSerDes()
         }
     }
     close(fd);
+    
+    // need adjust below sensor id
 }
 
 const struct sensor_def * probe_sensor(void)
@@ -476,7 +537,7 @@ const struct sensor_def * probe_sensor(void)
 	{
 		uint16_t reg = 0;
 		sensor = *sensor_list;
-		vcos_log_error("Probing sensor %s on addr %02X", sensor->name, sensor->i2c_addr);
+		vcos_log_error("Probing sensor %s on addr 0x%02X@7bits", sensor->name, sensor->i2c_addr);
 		if (sensor->i2c_ident_length <= 2)
 		{
 			if (!i2c_rd(fd, sensor->i2c_addr, sensor->i2c_ident_reg, (uint8_t*)&reg, sensor->i2c_ident_length, sensor))
@@ -910,7 +971,7 @@ uint32_t order_and_bit_depth_to_encoding(enum bayer_order order, int bit_depth)
         	vcos_log_error("%d not one of the handled bit depths", bit_depth);
             return 0;
 	}
-    vcos_log_error("order_and_bit_depth_to_encoding(order=%d, bit_depth=%d) return %#x\n", order, bit_depth, ret);
+    vcos_log_error("order_and_bit_depth_to_encoding(order=%d, bit_depth=%d) return %#x", order, bit_depth, ret);
     return ret;
 }
 
@@ -1203,7 +1264,19 @@ static int parse_cmdline(int argc, char **argv, RASPIRAW_PARAMS_T *cfg)
 				break;
 
 			case CommandSerDes:
-				cfg->ser_des = 1;
+                cfg->ser_des_sensor = "OV5647";
+                cfg->ser_des_sensor_id = OV_5647_ID;
+                cfg->ser_des_sensor_alias = OV_5647_ALIAS;
+                int len = strlen(argv[i + 1]);
+                if (len < 3) {
+                    len = 3;
+                }
+                if ((strncasecmp(argv[i + 1], "OV10640", len) == 0) || (argv[i + 1][0] == '1')){
+                    cfg->ser_des_sensor = "OV10640";
+                    cfg->ser_des_sensor_id = OV_10640_ID;
+                    cfg->ser_des_sensor_alias = OV_10640_ALIAS;
+                }
+                i++;
 				break;
 
 			case CommandDecodeMetadata:
@@ -1601,7 +1674,7 @@ int main(int argc, char** argv) {
 	cfg.top = -1;
 	cfg.opacity = 255;
 	cfg.fullscreen = 1;
-	cfg.ser_des = 0;
+    cfg.ser_des_sensor = NULL;
 
 	bcm_host_init();
 	vcos_log_register("RaspiRaw", VCOS_LOG_CATEGORY);
@@ -1621,11 +1694,11 @@ int main(int argc, char** argv) {
 	}
 
 	snprintf(i2c_device_name, sizeof(i2c_device_name), "/dev/i2c-%d", cfg.i2c_bus);
-	printf("Using i2C device %s\n", i2c_device_name);
+	vcos_log_error("Using i2C device %s", i2c_device_name);
 
-    if (cfg.ser_des) {
+    if (cfg.ser_des_sensor != NULL) {
         // before do any i2c work, we need do 953/954 config
-        setupSerDes();
+        setupSerDes(cfg.ser_des_sensor_id, cfg.ser_des_sensor_alias, cfg.ser_des_sensor);
     }
     
 	sensor = probe_sensor();
@@ -1755,7 +1828,7 @@ int main(int argc, char** argv) {
 		encoding = sensor_mode->encoding;
 	if (!encoding)
 	{
-		vcos_log_error("Failed to map bitdepth %d and order %d into encoding\n", cfg.bit_depth, sensor_mode->order);
+		vcos_log_error("Failed to map bitdepth %d and order %d into encoding", cfg.bit_depth, sensor_mode->order);
 		return -3;
 	}
 	vcos_log_error("Encoding %08X", encoding);
@@ -1763,39 +1836,39 @@ int main(int argc, char** argv) {
 	if (cfg.awb)
 	{
 		VCOS_STATUS_T vcos_status;
-		printf("Setup awb thread\n");
+		vcos_log_error("Setup awb thread");
 		vcos_status = vcos_thread_create(&awb_thread, "awb-thread",
 					NULL, awb_thread_task, &dev);
 		if(vcos_status != VCOS_SUCCESS)
 		{
-			printf("Failed to create awb thread\n");
+			vcos_log_error("Failed to create awb thread");
 			return -4;
 		}
 		dev.awb_queue = mmal_queue_create();
 		if (!dev.awb_queue)
 		{
-			printf("Failed to create awb queue\n");
+			vcos_log_error("Failed to create awb queue");
 			return -4;
 		}
 	}
 	else
-		printf("No AWB\n");
+		vcos_log_error("No AWB");
 
 	if (cfg.processing)
 	{
 		VCOS_STATUS_T vcos_status;
-		printf("Setup processing thread\n");
+		vcos_log_error("Setup processing thread");
 		vcos_status = vcos_thread_create(&processing_thread, "processing-thread",
 					NULL, processing_thread_task, &dev);
 		if(vcos_status != VCOS_SUCCESS)
 		{
-			printf("Failed to create processing thread\n");
+			vcos_log_error("Failed to create processing thread");
 			return -4;
 		}
 		dev.processing_queue = mmal_queue_create();
 		if (!dev.processing_queue)
 		{
-			printf("Failed to create processing queue\n");
+			vcos_log_error("Failed to create processing queue");
 			return -4;
 		}
 	}
@@ -2259,7 +2332,7 @@ int main(int argc, char** argv) {
 
 	if (!cfg.no_preview)
 	{
-		printf("Setup preview!\n");
+		vcos_log_error("Setup preview!");
 		MMAL_DISPLAYREGION_T param;
 		param.hdr.id = MMAL_PARAMETER_DISPLAYREGION;
 		param.hdr.size = sizeof(MMAL_DISPLAYREGION_T);
@@ -2326,18 +2399,18 @@ int main(int argc, char** argv) {
 	if (cfg.processing_yuv)
 	{
 		VCOS_STATUS_T vcos_status;
-		printf("Setup processing thread\n");
+		vcos_log_error("Setup processing thread");
 		vcos_status = vcos_thread_create(&processing_yuv_thread, "processing-yuv-thread",
 					NULL, processing_yuv_thread_task, &yuv_cb);
 		if(vcos_status != VCOS_SUCCESS)
 		{
-			printf("Failed to create processing yuv thread\n");
+			vcos_log_error("Failed to create processing yuv thread");
 			return -4;
 		}
 		yuv_cb.processing_yuv_queue = mmal_queue_create();
 		if (!yuv_cb.processing_yuv_queue)
 		{
-			printf("Failed to create processing yuv queue\n");
+			vcos_log_error("Failed to create processing yuv queue");
 			return -4;
 		}
 	}
@@ -2364,7 +2437,7 @@ int main(int argc, char** argv) {
     vcos_log_error("Sensor width=%d(round to 16), height=%d, dev encoding=%#x(%c%c%c%c), port: encoding=%#x(%c%c%c%c) ref http://www.jvcref.com/files/PI/documentation/html/group___mmal_encodings.html ", 
             sensor_mode->width, sensor_mode->height, encoding, pe[0], pe[1], pe[2], pe[3],
             port->format->encoding, pex[0], pex[1], pex[2], pex[3]);
-    vcos_log_error("stride is %d(for dev width=%d), bpp=%d, pitch=%d(for port width=%d(round to 32))\n", 
+    vcos_log_error("stride is %d(for dev width=%d), bpp=%d, pitch=%d(for port width=%d(round to 32))", 
             stride, dev.rawcam_output->format->es->video.width, bpp, pitch, port->format->es->video.width);
     
 	vcos_sleep(cfg.timeout);
@@ -2464,7 +2537,7 @@ void modRegBit(struct mode_def *mode, uint16_t reg, int bit, int value, enum ope
 	uint16_t val;
 	while(i < mode->num_regs && mode->regs[i].reg != reg) i++;
 	if (i == mode->num_regs) {
-		vcos_log_error("Reg: %04X not found!\n", reg);
+		vcos_log_error("Reg: %04X not found!", reg);
 		return;
 	}
 	val = mode->regs[i].data;
@@ -2516,7 +2589,7 @@ void update_regs(const struct sensor_def *sensor, struct mode_def *mode, int hfl
 	{
 		if (exposure < 0 || exposure >= (1<<sensor->exposure_reg_num_bits))
 		{
-			vcos_log_error("Invalid exposure:%d, exposure range is 0 to %u!\n",
+			vcos_log_error("Invalid exposure:%d, exposure range is 0 to %u!",
 						exposure, (1<<sensor->exposure_reg_num_bits)-1);
 		}
 		else
@@ -2536,7 +2609,7 @@ void update_regs(const struct sensor_def *sensor, struct mode_def *mode, int hfl
 	{
 		if (exposure < 0 || exposure >= (1<<sensor->vts_reg_num_bits))
 		{
-			vcos_log_error("Invalid exposure:%d, vts range is 0 to %u!\n",
+			vcos_log_error("Invalid exposure:%d, vts range is 0 to %u!",
 						exposure, (1<<sensor->vts_reg_num_bits)-1);
 		}
 		else
@@ -2557,7 +2630,7 @@ void update_regs(const struct sensor_def *sensor, struct mode_def *mode, int hfl
 	{
 		if (gain < 0 || gain >= (1<<sensor->gain_reg_num_bits))
 		{
-			vcos_log_error("Invalid gain:%d, gain range is 0 to %u\n",
+			vcos_log_error("Invalid gain:%d, gain range is 0 to %u",
 						gain, (1<<sensor->gain_reg_num_bits)-1);
 		}
 		else
