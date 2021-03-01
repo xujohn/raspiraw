@@ -143,13 +143,16 @@ struct sensor_def
 #include "adv7282m_modes.h"
 #include "imx477_modes.h"
 #include "ov10640_modes.h"
-
+#include "ov2724_modes.h"
+#include "ov0210_modes.h"
 const struct sensor_def *sensors[] = {
 	&ov5647,
 	&imx219,
 	&adv7282,
 	&imx477,
 	&ov10640,
+	&ov2724,
+	&ov0210,
 	NULL
 };
 
@@ -193,6 +196,7 @@ enum {
 	CommandProcessingYUV,
 	CommandOutputYUV,
 	CommandSerDes,
+	CommandDebug,
 };
 
 static COMMAND_LIST cmdline_commands[] =
@@ -234,9 +238,11 @@ static COMMAND_LIST cmdline_commands[] =
 	{ CommandProcessingYUV,	"-processing_yuv", "PY",  "Pass processed YUV images into an image processing function", 0 },
 	{ CommandOutputYUV,	"-output_yuv",  "oY", "Set the output filename for YUV data", 0 },
 	{ CommandSerDes,	"-serdes", "sd", "Use 953/954 serdes, followed with sensor name, eg: ov5647", 1 },
+	{ CommandDebug,	"-debug", "d", "Set debug level, 1 print 953/954 debug, 2 print reg debug, 4 print all debug", 1 },
 };
 
 static int cmdline_commands_size = sizeof(cmdline_commands) / sizeof(cmdline_commands[0]);
+static int debug = 0;
 
 typedef struct pts_node {
 	int	idx;
@@ -365,8 +371,16 @@ static int i2c_rd(int fd, uint8_t i2c_addr, uint16_t reg, uint8_t *values, uint3
 #define OV_5647_ID      0x6C        // for OV5647
 #define OV_5647_ALIAS   OV_5647_ID  // for OV5647
 #define OV_10640_ID     0x60        // for OV10640
-#define OV_10640_ALIAS  0x62        // for OV10640, to avoid conflict with 964, we change to 0x62@8bits
-struct sensor_regs serdes_954_step1[] = {
+#define OV_10640_ALIAS  0x62        // for OV10640, to avoid conflict with 954, we change to 0x62@8bits
+#define OV_2724_ID     0x6c       // for OV2724
+#define OV_2724_ALIAS  0x66        // for OV2724, to avoid conflict with ov5647, we change to 0x64@8bits
+#define OV_0210_ID     0x6C        // for OV2724
+#define OV_0210_ALIAS  0x66        // for OV2724, to avoid conflict with ov5647, we change to 0x64@8bits
+struct sensor_regs serdes_953_step1[] = {
+   {0x0001, 0x02},        //reset 953
+  // {0xFFFE, 1000},        // sleep(1)
+};
+struct sensor_regs serdes_954_step2[] = {
    {0x0001, 0x01},                  //reset 954
    {0x004C, 0x01},                  // setup port0
    {0x0058, 0x5E},                  // Set up Back Channel Config (0x58)
@@ -375,26 +389,23 @@ struct sensor_regs serdes_954_step1[] = {
    {0x005D, OV_5647_ID},            // Set up Slave/Camera ID, NOTICE: should change it base the input.
    {0x0065, OV_5647_ALIAS},         // Set up Slave/Camera Alias ID
 };
-struct sensor_regs serdes_953_step2[] = {
+struct sensor_regs serdes_953_step3[] = {
    //{0x0001, 0x01},        //reset 953
    {0x0002, 0x13},        // Set serializer CSI-2 data input from imager lane to 2 lane, 1.8V VDDIO
    {0x000E, 0xC0},        // Set GPIO2 and GPIO3 to outputs, where GPIO2 = PWDN and GPIO3 = RESET
    {0x000D, 0x0C},        // Set GPIO2 and GPIO3 to High - bring OVT10640 out of power down mode
-   {0xFFFF, 100},         // sleep(0.1)
+   {0xFFFE, 100},         // sleep(0.1)
    {0x000D, 0x08},        // Bring GPIO3 low to place 10640 in reset
-   {0xFFFF, 1000},        // sleep(1)
-   {0x000D, 0x0C},        // Bring GPIO3 high again to prepare 10640 for initialization
+   {0xFFFE, 1000},        // sleep(1)
+   {0x000D, 0x0c},        // Bring GPIO3 high again to prepare 10640 for initialization
 };
-struct sensor_regs serdes_954_step3[] = {
+struct sensor_regs serdes_954_step4[] = {
    {0x0032, 0x01},
    {0x0033, 0x23},        // enable CSI output and CSI continuous clock, 2lane
    {0x0021, 0x81},        // enable CSI replicate mode
    {0x0020, 0x20},        // enable RX 0 port forwarding to CSI ports
 };
-struct sensor_regs serdes_ov5647_step4[] = {
-   {0x0103, 0x01},        // Bring GPIO3 low to place 10640 in reset
-   {0xFFFF, 100},         // sleep(0.1)
-};
+
 struct serdes_reg_def
 {
 	char *name;
@@ -407,18 +418,29 @@ struct serdes_reg_def
 
 struct sensor_regs ov5647_serdes[] = {
    {0x0103, 0x01},        // Bring GPIO3 low to place 10640 in reset
-   {0xFFFF, 100},         // sleep(0.1)
+   {0xFFFE, 100},         // sleep(0.1)
 };
 struct sensor_regs ov10640_serdes[] = {
    {0x3013, 0x01},        // TODO: #Initialize OVT10640
-   {0xFFFF, 100},         // TODO: sleep(0.1)
+   {0xFFFE, 100},         // TODO: sleep(0.1)
+};
+struct sensor_regs ov2724_serdes[] = {
+   //{0x0103, 0x01},        // TODO: #Initialize OV2724
+   {0xFFFE, 100},         // TODO: sleep(0.1)
+};
+struct sensor_regs ov0210_serdes[] = {
+   {0x0103, 0x01},        // TODO: #Initialize OV2724
+   {0xFFFE, 100},         // TODO: sleep(0.1)
 };
 struct serdes_reg_def serdes_regs[] = {
-    {"954", UB954_ID, UB954_ID, 1, serdes_954_step1, NUM_ELEMENTS(serdes_954_step1)},
-    {"953", UB953_ID, UB953_ALIAS, 1, serdes_953_step2, NUM_ELEMENTS(serdes_953_step2)},
-    {"954", UB954_ID, UB954_ID, 1, serdes_954_step3, NUM_ELEMENTS(serdes_954_step3)},
+    {"953", UB953_ID, UB953_ALIAS, 1, serdes_953_step1, NUM_ELEMENTS(serdes_953_step1)},
+    {"954", UB954_ID, UB954_ID, 1, serdes_954_step2, NUM_ELEMENTS(serdes_954_step2)},
+    {"953", UB953_ID, UB953_ALIAS, 1, serdes_953_step3, NUM_ELEMENTS(serdes_953_step3)},
+    {"954", UB954_ID, UB954_ID, 1, serdes_954_step4, NUM_ELEMENTS(serdes_954_step4)},
     {"OV5647", OV_5647_ID, OV_5647_ALIAS, 2, ov5647_serdes, NUM_ELEMENTS(ov5647_serdes)},
     {"OV10640", OV_10640_ID, OV_10640_ALIAS, 2, ov10640_serdes, NUM_ELEMENTS(ov10640_serdes)},
+    {"OV2724", OV_2724_ID, OV_2724_ALIAS, 2, ov2724_serdes, NUM_ELEMENTS(ov2724_serdes)},  
+    {"OV0210", OV_0210_ID, OV_0210_ALIAS, 2, ov0210_serdes, NUM_ELEMENTS(ov0210_serdes)},  
 };
 static int num_serdes_steps = NUM_ELEMENTS(serdes_regs);
 
@@ -426,7 +448,7 @@ void i2c_wr(int fd, const struct serdes_reg_def *regdef)
 {
     int i;
     for (i = 0; i < regdef->num_regs; i++) {
-        if (regdef->regs[i].reg == 0xFFFF) {
+        if (regdef->regs[i].reg == 0xFFFE) {
             vcos_log_error("%s(0x%02X@7bits)  #%03d: sleep %d ms", regdef->name, regdef->i2c_alias >> 1, i, regdef->regs[i].data);
             vcos_sleep(regdef->regs[i].data);
         } else {
@@ -451,21 +473,26 @@ void i2c_wr(int fd, const struct serdes_reg_def *regdef)
     }
 }
 
-int setup_sensor_id_offset(uint8_t sensor_id, uint8_t sensor_alias, char *name, struct serdes_reg_def *regdef)
+int setup_sensor_id_offset(uint8_t sensor_id, uint8_t sensor_alias, char *name, struct serdes_reg_def *regdef, int n)
 {
-    int i;
+    int i, j;
     int found = 0;
-    for (i = 0; i < regdef->num_regs; i++) {
-        if (regdef->regs[i].reg == 0x005D) {
-            regdef->regs[i].data = serdes_regs->i2c_id;
-            vcos_log_error("Found 0x005D command, change sensor(%s) id(I2C Address) to 0x%02X(0x%02X@7bits)", name, sensor_id, sensor_id >> 1);
-            found ++;
-        } else if (regdef->regs[i].reg == 0x0065) {
-            regdef->regs[i].data = serdes_regs->i2c_id;
-            vcos_log_error("Found 0x0065 command, change sensor(%s) alias(I2C Address) to 0x%02X(0x%02X@7bits)", name, sensor_alias, sensor_alias >> 1);
-            found ++;
-        }
-    }
+    for (j = 0; j < n; j++) {
+		if ((regdef->i2c_id == UB953_ID) || (regdef->i2c_id == UB954_ID)) {
+			for (i = 0; i < regdef->num_regs; i++) {
+				if (regdef->regs[i].reg == 0x005D) {
+					regdef->regs[i].data = sensor_id;
+					vcos_log_error("Found 0x005D command, change sensor(%s) id(I2C Address) to 0x%02X(0x%02X@7bits)", name, sensor_id, sensor_id >> 1);
+					found ++;
+				} else if (regdef->regs[i].reg == 0x0065) {
+					regdef->regs[i].data = sensor_alias;
+					vcos_log_error("Found 0x0065 command, change sensor(%s) alias(I2C Address) to 0x%02X(0x%02X@7bits)", name, sensor_alias, sensor_alias >> 1);
+					found ++;
+				}
+			}
+		}
+		regdef++;
+	}
     if (found == 2) {
         return 0;
     } else {
@@ -484,7 +511,7 @@ int setupSerDes(uint8_t sensor_id, uint8_t sensor_alias, char *sensor_name)
         return 1;
     }
     //if (!i2c_rd(fd, UB954_ID, sensor->i2c_ident_reg, (uint8_t*)&reg, sensor->i2c_ident_length, sensor))
-    if (0 != setup_sensor_id_offset(sensor_id, sensor_alias, sensor_name, &serdes_regs[0])) {
+    if (0 != setup_sensor_id_offset(sensor_id, sensor_alias, sensor_name, &serdes_regs[0], num_serdes_steps)) {
         return 1;
     }
     
@@ -589,7 +616,9 @@ void send_regs(int fd, const struct sensor_def *sensor, const struct sensor_regs
 				{
 					vcos_log_error("Failed to write register index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
 				} else {
-					vcos_log_error("Write index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
+					if (debug & 0x2 == 0x2)  {
+						vcos_log_error("Write index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
+					}
 				}
 			}
 			else
@@ -607,7 +636,9 @@ void send_regs(int fd, const struct sensor_def *sensor, const struct sensor_regs
 				{
 					vcos_log_error("Failed to write register index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
 				} else {
-					vcos_log_error("Write index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
+					if (debug & 0x2 == 0x2)  {
+						vcos_log_error("Write index %d(%04X val %04X)", i, regs[i].reg, regs[i].data);
+					}
 				}
 			}
 		}
@@ -760,7 +791,7 @@ static void callback(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *buffer)
 			// SD card access is too slow to do much more.
 			FILE *file;
 			char *filename = NULL;
-			if (create_filenames(&filename, cfg->output, count) == MMAL_SUCCESS)
+			if ((buffer->length > 0) && (create_filenames(&filename, cfg->output, count) == MMAL_SUCCESS))
 			{
 				file = fopen(filename, "wb");
 				if (file)
@@ -1276,9 +1307,25 @@ static int parse_cmdline(int argc, char **argv, RASPIRAW_PARAMS_T *cfg)
                     cfg->ser_des_sensor_id = OV_10640_ID;
                     cfg->ser_des_sensor_alias = OV_10640_ALIAS;
                 }
+                if ((strncasecmp(argv[i + 1], "OV2724", len) == 0) || (argv[i + 1][0] == '2')){
+                    cfg->ser_des_sensor = "OV2724";
+                    cfg->ser_des_sensor_id = OV_2724_ID;
+                    cfg->ser_des_sensor_alias = OV_2724_ALIAS;
+                }
+                 if ((strncasecmp(argv[i + 1], "OV0210", len) == 0) || (argv[i + 1][0] == '0') ){
+                    cfg->ser_des_sensor = "OV0210";
+                    cfg->ser_des_sensor_id = OV_0210_ID;
+                    cfg->ser_des_sensor_alias = OV_0210_ALIAS;
+                }
                 i++;
 				break;
-
+			case CommandDebug:
+				if (sscanf(argv[i + 1], "%d", &debug) != 1)
+					valid = 0;
+				else
+					i++;
+				break;
+				
 			case CommandDecodeMetadata:
 				cfg->decodemetadata = 1;
 				break;
@@ -1675,7 +1722,8 @@ int main(int argc, char** argv) {
 	cfg.opacity = 255;
 	cfg.fullscreen = 1;
     cfg.ser_des_sensor = NULL;
-
+	debug = 0;
+	
 	bcm_host_init();
 	vcos_log_register("RaspiRaw", VCOS_LOG_CATEGORY);
 
@@ -1818,8 +1866,8 @@ int main(int argc, char** argv) {
 	if (cfg.exposure_us != -1)
 	{
 		cfg.exposure = ((int64_t)cfg.exposure_us * 1000) / sensor_mode->line_time_ns;
-		vcos_log_error("Setting exposure to %d from time %dus", cfg.exposure, cfg.exposure_us);
 	}
+	vcos_log_error("Setting exposure to %d from time %dus, line_time_ns is %d", cfg.exposure, cfg.exposure_us, sensor_mode->line_time_ns);
 
 	update_regs(sensor, sensor_mode, cfg.hflip, cfg.vflip, cfg.exposure, cfg.gain);
 	if (sensor_mode->encoding == 0)

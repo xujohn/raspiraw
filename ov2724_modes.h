@@ -1,0 +1,223 @@
+#ifndef OV2724MODES_H_
+#define OV2724MODES_H_
+
+struct sensor_regs ov2724_mode0[] =
+{  
+        {0x0103, 0x01},	
+	{0x0101, 0x00}, 
+	{0x0301, 0x0a},
+	{0x0303, 0x05}, 
+	{0x0307, 0x64}, 
+	{0x0340, 0x09}, 
+	{0x0341, 0x20},//Frame Length [7:0]
+	{0x0342, 0x08},//LINE Length [14:8]	2282
+	{0x0343, 0xea},//LINE Length [7:0]
+	{0x0344, 0x00},//x_addr_start[11:8]	0
+	{0x0345, 0x00},//x_addr_start[7:0]	0
+	{0x0346, 0x00},//y_addr_start[10:8]	0
+	{0x0347, 0x00},//y_addr_start[7:0]	0
+	{0x0348, 0x07},//x_addr_end[11:8]	1952-1
+	{0x0349, 0x9f},//x_addr_end[7:0]
+	{0x034a, 0x04},//y_addr_end[10:8]	1096-1
+	{0x034b, 0x47},//y_addr_end[7:0]    
+	{0x034c, 0x07},//X output size[11:8]	1920
+	{0x034d, 0x80},//X output size[7:0]
+	{0x034e, 0x04},//Y output size[11:8]	1080
+	{0x034f, 0x38},//Y output size[7:0]
+	{0x0381, 0x01},//X even inc			
+	{0x0383, 0x01},//X odd inc
+	{0x0385, 0x01},//Y even inc
+	{0x0387, 0x01},//Y odd inc
+	{0x3014, 0x28},//unknown
+	{0x3019, 0xd2},//Temperture related, unknow meaning
+	{0x3019, 0xf0},//enable temperture read!!!
+	{0x301f, 0x63},//unknown
+	{0x3020, 0x09},//unknown
+	{0x3103, 0x02},//unknown
+	{0x3106, 0x10},//unknown
+	{0x3500, 0x09},//LEXP Gain0 [14:8]
+	{0x3501, 0x20},//LEXP Gain0 [7:0]
+	{0x3502, 0x01},//LEXP Gain1 [14:8]
+	{0x3503, 0x20},//LEXP Gain1 [7:0]
+	{0x3504, 0x02},//LEXP Gain2 [14:8]
+	{0x3505, 0x20},//LEXP Gain2 [7:0]
+	{0x3508, 0x00},//SEXP Gain0 [14:8]
+	{0x3509, 0x80},//SEXP Gain0 [7:0]
+	{0x350a, 0x00},//SEXP Gain1 [14:8]
+	{0x350b, 0x7f},//SEXP Gain1 [7:0]
+	{0x350c, 0x00},//SEXP Gain2 [14:8]
+	{0x350d, 0x7f},//SEXP Gain2 [7:0]
+	{0x350f, 0x03},//Manual Gain, Manual Exposure
+	{0x3510, 0x00},//Expo0 S [14:8]
+	{0x3511, 0x20},//Expo0 S [7:0]
+	{0x3512, 0x00},//unknown
+	{0x3513, 0x20},//unknown
+	{0x3514, 0x00},//unknown
+	{0x3515, 0x20},//unknown
+	{0x3518, 0x00},//Gain0 S [15:8]
+	{0x3519, 0x7f},//Gain0 S [7:0]
+	{0x351a, 0x00},//unknown
+	{0x351b, 0x10},//unknown
+	{0x351c, 0x00},//unknown
+	{0x351d, 0x10},//unknown
+	{0x3602, 0x7c},//unknown
+	{0x3603, 0x22},//unknown
+	{0x3620, 0x80},//unknown
+	{0x3622, 0x0b},//unknown
+	{0x3623, 0x48},//unknown
+	{0x3632, 0xa0},//unknown
+	{0x3703, 0x23},//unknown
+	{0x3707, 0x93},//unknown
+	{0x3708, 0x46},//unknown
+	{0x370a, 0x33},//unknown
+	{0x3716, 0x50},//unknown
+	{0x3717, 0x00},//unknown
+	{0x3718, 0x10},//unknown
+	{0x371c, 0xfe},//unknown
+	{0x371d, 0x44},//unknown
+	{0x371e, 0x61},//unknown
+	{0x3721, 0x10},//unknown
+	{0x3725, 0xd1},//unknown
+	{0x3730, 0x01},//unknown
+	{0x3731, 0xd0},//unknown
+	{0x3732, 0x02},//unknown
+	{0x3733, 0x60},//unknown
+	{0x3734, 0x00},//unknown
+	{0x3735, 0x00},//unknown
+	{0x3736, 0x00},//unknown
+	{0x3737, 0x00},//unknown
+	{0x3738, 0x02},//unknown
+	{0x3739, 0x20},//unknown
+	{0x373a, 0x01},//unknown
+	{0x373b, 0xb0},//unknown
+	{0x3748, 0x0b},//unknown
+	{0x3749, 0x9c},//unknown
+	{0x3759, 0x50},//unknown
+	{0x3810, 0x00},//unknown
+	{0x3811, 0x0f},//unknown
+	{0x3812, 0x00},//unknown
+	{0x3813, 0x08},//unknown
+	{0x3820, 0x80},//Vert Bin no
+	{0x3821, 0x00},//Hort Bin no
+	{0x382d, 0x00},//unknown
+	{0x3831, 0x00},//unknown
+	{0x3b00, 0x50},//unknown
+	{0x3b01, 0x24},//unknown
+	{0x3b02, 0x34},//Dummy lies
+	{0x3b04, 0xdc},//unknown
+	{0x3b09, 0x62},//unknown
+	{0x4001, 0x00},// ;DCBLC 20->reg, 00->OTP
+	{0x4008, 0x04},//unknown
+	{0x4009, 0x0d},//unknown
+	{0x400a, 0x01},//unknown
+	{0x400b, 0x80},//unknown
+	{0x400c, 0x00},//unknown
+	{0x400d, 0x01},//unknown
+	{0x4010, 0x50},//unknown
+	{0x4017, 0x08},//unknown
+	{0x4042, 0x12},//unknown
+	{0x4303, 0x00},//unknown
+	{0x4307, 0x3a},//unknown
+	{0x4320, 0x80},//Test Pattern
+	{0x4322, 0x00},//Solid color 
+	{0x4323, 0x00},//Solid color 
+	{0x4324, 0x00},//Solid color 
+	{0x4325, 0x00},//Solid color 
+	{0x4326, 0x00},//Solid color
+	{0x4327, 0x00},//Solid color
+	{0x4328, 0x00},//Solid color
+	{0x4329, 0x00},//Solid color
+	{0x4501, 0x08},//unknown
+	{0x4505, 0x05},//hSub ctrl
+	{0x4601, 0x0a},//unknown
+	{0x4800, 0x04},//MIPI CTRL00
+	{0x4816, 0x52},//unknown
+	{0x481f, 0x50},//CLK PREPARE MIN
+	{0x4837, 0x14},//PCLK PERIOD
+	{0x4838, 0x00},//MIPILP GPIO0
+	{0x490b, 0x00},//unknown
+	{0x4a00, 0x01},//unknown
+	{0x4a01, 0xff},//unknown
+	{0x4a02, 0x59},//unknown
+	{0x4a03, 0xd7},//unknown
+	{0x4a04, 0xff},//unknown
+	{0x4a05, 0x30},//unknown
+	{0x4a07, 0xff},//unknown
+	{0x4d00, 0x04},//unknown
+	{0x4d01, 0x51},//unknown
+	{0x4d02, 0xd0},//unknown
+	{0x4d03, 0x7f},//unknown
+	{0x4d04, 0x92},//unknown
+	{0x4d05, 0xcf},//unknown
+	{0x4d0b, 0x01},//TMP Trigger Auto
+	{0x5000, 0x1f},//AEWB Enable
+	{0x5080, 0xc0},//Color Bar
+	{0x5101, 0x0a},//OTP Start Addr
+	{0x5103, 0x69},//OTP End Addr
+	{0x3021, 0x00},//Use Internal regulator 
+	{0x3022, 0x00},//unknown
+        {0x0100, 0x01},
+
+};
+
+struct mode_def ov2724_modes[] = {
+   {
+      .regs          = ov2724_mode0,
+      .num_regs      = NUM_ELEMENTS(ov2724_mode0),
+      .width         = 1920,
+      .height        = 1080,
+      .encoding      = 0,
+      .order         = BAYER_ORDER_BGGR,
+      .native_bit_depth = 10,
+      .image_id      = 0x2B,
+      .data_lanes    = 2,
+      .min_vts       = 1104,
+      .line_time_ns  = 30375,
+    //   .line_time_ns  = 15187,
+   
+      .timing        = {0, 0, 0, 0, 0},
+      .term          = {0, 0},
+      .black_level   = 16,
+   },   
+  };
+
+#undef addreg
+
+struct sensor_regs ov2724_stop[] = {
+   { 0x0100, 0x00 },
+};
+
+// ID register settings taken from http://www.mail-archive.com/linux-kernel@vger.kernel.org/msg1298623.html
+struct sensor_def ov2724 = {
+   .name =                 "ov2724",
+   .modes =               ov2724_modes,
+   .num_modes =            NUM_ELEMENTS(ov2724_modes),
+   .stop =                 ov2724_stop,
+   .num_stop_regs =        NUM_ELEMENTS(ov2724_stop),
+
+    // NOTICE: datasheet the address is 0x60@8bits, the pi will use 0x30@7bits,
+    // But 0x30 will conflict with the UB954 device id, so we adjust it's value to 0x31@7bits
+
+
+   .i2c_addr =             0x33,
+   .i2c_addressing =       2,
+   .i2c_ident_length =     2,
+   .i2c_ident_reg =        0x300A,
+   .i2c_ident_value =      0x2427,  //0x2724 byte swapped
+
+   .vflip_reg =            0x0101,  // TODO:
+   .vflip_reg_bit =        1,       // TODO:
+   .hflip_reg =            0x0101,  // TODO:
+   .hflip_reg_bit =        0,       // TODO:
+
+   .exposure_reg =         0x3500,  // TODO:
+   .exposure_reg_num_bits = 15,     // TODO:
+
+   .vts_reg =              0x0340,  // TODO:
+   .vts_reg_num_bits =     15,      // TODO:
+
+   .gain_reg =             0x3508,  // TODO:
+   .gain_reg_num_bits =    16,      // TODO:
+};
+
+#endif

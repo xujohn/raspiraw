@@ -160,6 +160,7 @@ struct sensor_regs ov5647_mode1[] =
       addreg(0x3034, 0x1A),
       addreg(0x3035, 0x21),
       addreg(0x3036, 0x62),
+      addreg(0x3037, 0x03),
       addreg(0x303C, 0x11),
       addreg(0x3106, 0xF5),
       addreg(0x3827, 0xEC),
@@ -182,6 +183,8 @@ struct sensor_regs ov5647_mode1[] =
       addreg(0x3A19, 0xF8),
       addreg(0x3C01, 0x80),
       addreg(0x3B07, 0x0C),
+      //addreg(0x380C, 0x09),
+      //addreg(0x380D, 0x70),
       addreg(0x380C, 0x09),
       addreg(0x380D, 0x70),
       addreg(0x3814, 0x11),
@@ -249,6 +252,7 @@ struct sensor_regs ov5647_mode1[] =
       addreg(0x3502, 0x20),
       addreg(0x3212, 0xA0),
       addreg(0x0100, 0x01),
+   //   addreg(0x503D, 0x80),
 };
 
 struct sensor_regs ov5647_mode2[] =
@@ -846,7 +850,7 @@ struct mode_def ov5647_modes[] = {
       .image_id      = 0x2B,
       .data_lanes    = 2,
       .min_vts       = 1968,
-      .line_time_ns  = 32503,
+      //.line_time_ns  = 32503,
       .timing        = {0, 0, 0, 0, 0},
       .term          = {0, 0},
       .black_level   = 16,
@@ -862,7 +866,8 @@ struct mode_def ov5647_modes[] = {
       .image_id      = 0x2B,
       .data_lanes    = 2,
       .min_vts       = 1104,
-      .line_time_ns  = 29584,
+//    .line_time_ns  = 29584,
+      .line_time_ns  = 23000,
       .timing        = {0, 0, 0, 0, 0},
       .term          = {0, 0},
       .black_level   = 16,
